@@ -1,13 +1,10 @@
 import os
+import base64
 import requests
-import resend
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib import colors
-
-# Securely load the Resend API key from Render's environment settings
-resend.api_key = os.environ.get("RESEND_API_KEY", "")
 
 def generate_wind_pdf(email: str, location: str, wind_data: dict, vawt_status: str, filename="wind_assessment_report.pdf"):
     doc = SimpleDocTemplate(filename, pagesize=letter, rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40)
@@ -86,12 +83,20 @@ def process_wind_assessment(email: str, location_str: str):
 
     pdf_path = generate_wind_pdf(email, location_str, wind_profile, vawt_status)
 
-    # Automatically send the generated PDF to the user's email inbox via Resend
+    # Automatically send the generated PDF to the user's email inbox via Resend REST API
     try:
         with open(pdf_path, "rb") as f:
             pdf_bytes = f.read()
 
-        params = {
+        pdf_base64 = base64.b64encode(pdf_bytes).decode("utf-8")
+
+        api_key = os.environ.get("RESEND_API_KEY", "")
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json"
+        }
+
+        payload = {
             "from": "Maini Renewables <onboarding@resend.dev>",
             "to": [email],
             "subject": "Your Wind Assessment & VAWT Suitability Report",
@@ -99,11 +104,17 @@ def process_wind_assessment(email: str, location_str: str):
             "attachments": [
                 {
                     "filename": "wind_assessment_report.pdf",
-                    "content": list(pdf_bytes)
+                    "content": pdf_base64
                 }
             ]
         }
-        resend.Emails.send(params)
+
+        res = requests.post("https://api.resend.com/emails", json=payload, headers=headers)
+        if res.status_code != 200:
+            print(f"Resend API Error: {res.text}")
+        else:
+            print("Email successfully dispatched via Resend API.")
+
     except Exception as email_err:
         print(f"Failed to send email: {email_err}")
 
